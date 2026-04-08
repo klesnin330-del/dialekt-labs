@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Автоматическая транскрипция диалектной речи</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Автоматическая транскрипция диалектной речи</h1>
+        <nav class="nav">
+            <a href="/">ЛР1: Транскрипция</a>
+            <a href="/lab2">ЛР2: Генерация речи</a>
+        </nav>
+        <p class="subtitle">
+            Загрузите аудиофайл, чтобы получить орфографическую запись и фонетическую транскрипцию.
+        </p>
+
+        <form method="POST" enctype="multipart/form-data" class="upload-form">
+            <input type="file" name="audio_file" accept=".wav,.mp3,.m4a,.ogg,.flac" required>
+            <button type="submit">Обработать</button>
+        </form>
+
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if result %}
+            <div class="result-block">
+                <h2>Результат</h2>
+                <p><strong>Файл:</strong> {{ result.filename }}</p>
+
+                <div class="result-section">
+                    <h3>Орфографическая запись</h3>
+                    <div class="result-box">{{ result.orthographic_text }}</div>
+                </div>
+
+                <div class="result-section">
+                    <h3>Транскрипция</h3>
+                    <div class="result-box">{{ result.phonetic_text }}</div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ЛР2 — Генерация диалектной речи</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>ЛР2 — Автоматическая генерация диалектной речи</h1>
+
+    <nav class="nav">
+      <a href="/">ЛР1: Транскрипция</a>
+      <a href="/lab2">ЛР2: Генерация речи</a>
+    </nav>
+
+    <p class="subtitle">
+      Введите текст (орфография) или транскрипцию (в нашем формате) и получите озвучку (mp3).
+    </p>
+
+    <form method="POST" class="upload-form" style="align-items:flex-start;">
+      <div style="width:100%;">
+        <label><strong>Режим ввода:</strong></label><br>
+        <label><input type="radio" name="input_mode" value="orth" checked> Орфографическая запись</label>
+        <label style="margin-left:12px;"><input type="radio" name="input_mode" value="phon"> Транскрипция</label>
+
+        <div style="height:10px;"></div>
+
+        <label><strong>Текст:</strong></label><br>
+        <textarea name="text" rows="6" style="width:100%; padding:10px; border-radius:8px; border:1px solid #dfe5ee;" required>{{ form_text or "" }}</textarea>
+
+        <div style="height:10px;"></div>
+
+
+        <div style="height:10px;"></div>
+
+        <label><strong>Голос:</strong></label>
+        <select name="voice" style="padding:8px; border-radius:8px; border:1px solid #dfe5ee;">
+          <option value="ru-RU-DmitryNeural" {% if voice == "ru-RU-DmitryNeural" %}selected{% endif %}>ru-RU-DmitryNeural</option>
+          <option value="ru-RU-SvetlanaNeural" {% if voice == "ru-RU-SvetlanaNeural" %}selected{% endif %}>ru-RU-SvetlanaNeural</option>
+        </select>
+
+        <label style="margin-left:12px;"><strong>Темп:</strong></label>
+        <select name="rate" style="padding:8px; border-radius:8px; border:1px solid #dfe5ee;">
+          <option value="-10%" {% if rate == "-10%" %}selected{% endif %}>-10%</option>
+          <option value="+0%" {% if rate == "+0%" %}selected{% endif %}>+0%</option>
+          <option value="+10%" {% if rate == "+10%" %}selected{% endif %}>+10%</option>
+        </select>
+
+        <div style="height:14px;"></div>
+
+        <button type="submit">Сгенерировать речь</button>
+      </div>
+    </form>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+      <div class="result-block">
+        <h2>Результат</h2>
+
+        <div class="result-section">
+          <h3>Текст, отправленный в синтез</h3>
+          <div class="result-box">{{ result.tts_text }}</div>
+        </div>
+
+        <div class="result-section">
+          <h3>Аудио</h3>
+          <audio controls src="{{ result.audio_url }}" style="width:100%;"></audio>
+          <p style="margin-top:10px;">
+            <a href="{{ result.audio_url }}" download>Скачать mp3</a>
+          </p>
+        </div>
+      </div>
+    {% endif %}
+
+  </div>
+</body>
+</html>
