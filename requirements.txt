@@ -1,4 +1,6 @@
-﻿Flask==3.0.3
+﻿setuptools==69.5.1
+wheel==0.43.0
+Flask==3.0.3
 gunicorn==22.0.0
 openai-whisper==20231117
 ffmpeg-python==0.2.0

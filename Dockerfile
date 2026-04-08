@@ -3,8 +3,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
+ENV PIP_NO_BUILD_ISOLATION=1
 
-# ffmpeg нужен whisper; libgomp1 часто нужен torch
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgomp1 \
@@ -14,8 +14,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# ВАЖНО: ставим setuptools/wheel до requirements (фикс pkg_resources)
-RUN python -m pip install --upgrade pip "setuptools<71" wheel
+# КРИТИЧНО: фиксируем setuptools с pkg_resources
+RUN python -m pip install --upgrade pip \
+    && python -m pip install "setuptools==69.5.1" "wheel==0.43.0"
 
 RUN pip install -r requirements.txt
 
