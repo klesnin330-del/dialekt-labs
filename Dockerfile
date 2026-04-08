@@ -16,6 +16,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    espeak-ng \
+    libgomp1 \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
 # Скачиваем маленькую русскую модель Vosk на этапе сборки (это делает Render, не твой ПК)
 RUN mkdir -p /app/models \
     && cd /app/models \
