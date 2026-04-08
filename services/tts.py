@@ -12,9 +12,6 @@ except Exception:
 
 
 def _parse_rate_percent(rate: str) -> int:
-    """
-    "+10%" -> 10, "-10%" -> -10, "+0%" -> 0
-    """
     m = re.match(r"^\s*([+-]?\d+)\s*%\s*$", rate or "")
     return int(m.group(1)) if m else 0
 
@@ -35,11 +32,18 @@ def _synthesize_edge_tts(text: str, out_dir: str, voice: str, rate: str) -> str:
     return filename
 
 
-def _synthesize_espeak(text: str, out_dir: str, rate: str) -> str:
+def _map_voice_to_espeak_variant(voice: str) -> str:
     """
-    Оффлайн TTS через espeak-ng -> wav -> mp3 (через ffmpeg).
-    Работает стабильно на хостинге, не требует внешних API.
+    Мапим выбор из UI в варианты espeak-ng.
+    В espeak-ng можно задавать variant через +m/+f.
     """
+    voice = (voice or "").lower()
+    if "svetlana" in voice:
+        return "ru+f3"   # более "женский" тембр
+    return "ru+m3"       # более "мужской" тембр
+
+
+def _synthesize_espeak(text: str, out_dir: str, voice: str, rate: str) -> str:
     os.makedirs(out_dir, exist_ok=True)
     filename = f"{uuid.uuid4().hex}.mp3"
     mp3_path = os.path.join(out_dir, filename)
@@ -50,19 +54,28 @@ def _synthesize_espeak(text: str, out_dir: str, rate: str) -> str:
     speed = max(80, min(250, speed))
 
     wav_tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+    espeak_voice = _map_voice_to_espeak_variant(voice)
 
     try:
         # 1) espeak-ng -> wav
         subprocess.run(
-            ["espeak-ng", "-v", "ru", "-s", str(speed), "-w", wav_tmp, text],
+            ["espeak-ng", "-v", espeak_voice, "-s", str(speed), "-a", "200", "-w", wav_tmp, text],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
-        # 2) wav -> mp3
+        # 2) wav -> mp3 (делаем нормальный mp3 без “рваности”)
         subprocess.run(
-            ["ffmpeg", "-y", "-i", wav_tmp, "-codec:a", "libmp3lame", "-qscale:a", "4", mp3_path],
+            [
+                "ffmpeg", "-y",
+                "-i", wav_tmp,
+                "-ar", "44100",
+                "-ac", "1",
+                "-codec:a", "libmp3lame",
+                "-b:a", "128k",
+                mp3_path,
+            ],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -77,27 +90,18 @@ def _synthesize_espeak(text: str, out_dir: str, rate: str) -> str:
 
 
 def synthesize_to_mp3(text: str, out_dir: str, voice: str = "ru-RU-DmitryNeural", rate: str = "+0%") -> str:
-    """
-    TTS_ENGINE:
-      - edge   (как было, красиво, но может быть заблокирован => 403)
-      - espeak (оффлайн, стабильный)
-    По умолчанию: если edge падает, пробуем espeak.
-    """
     if not text or not text.strip():
         raise ValueError("Пустой текст для синтеза речи.")
 
     engine = (os.getenv("TTS_ENGINE") or "edge").strip().lower()
 
-    # 1) Пробуем edge-tts (если выбран или по умолчанию)
     if engine == "edge":
-        try:
-            return _synthesize_edge_tts(text=text, out_dir=out_dir, voice=voice, rate=rate)
-        except Exception:
-            # fallback на espeak (чтобы работало "железно")
-            return _synthesize_espeak(text=text, out_dir=out_dir, rate=rate)
+        # красивый вариант (обычно работает локально)
+        return _synthesize_edge_tts(text=text, out_dir=out_dir, voice=voice, rate=rate)
 
-    # 2) Явно espeak
     if engine == "espeak":
-        return _synthesize_espeak(text=text, out_dir=out_dir, rate=rate)
+        # стабильный вариант для хостинга
+        return _synthesize_espeak(text=text, out_dir=out_dir, voice=voice, rate=rate)
 
-    raise ValueError(f"Unknown TTS_ENGINE: {engine}")
+    # fallback: если не поняли — используем espeak
+    return _synthesize_espeak(text=text, out_dir=out_dir, voice=voice, rate=rate)
