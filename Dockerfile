@@ -15,7 +15,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # ВАЖНО: ставим setuptools/wheel до requirements (фикс pkg_resources)
-RUN python -m pip install --upgrade pip setuptools wheel
+RUN python -m pip install --upgrade pip "setuptools<71" wheel
 
 RUN pip install -r requirements.txt
 
