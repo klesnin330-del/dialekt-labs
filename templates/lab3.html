@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ЛР3 — Интерактивная карта русских говоров Удмуртии</title>
+
+  <!-- общий стиль сайта (если есть) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+
+  <!-- стиль ЛР3 -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='lab3/style.css') }}"/>
+</head>
+<body>
+  <header class="header">
+    <div class="title">ЛР3 — Интерактивная карта русских говоров Удмуртии</div>
+    <div class="subtitle">Данные из Google Sheets; точки можно добавлять прямо на странице.</div>
+
+    <nav class="nav">
+      <a href="/">ЛР1: Транскрипция</a>
+      <a href="/lab2">ЛР2: Генерация речи</a>
+      <a href="/lab3">ЛР3: Карта</a>
+    </nav>
+  </header>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="block">
+        <div class="block-title">Статус</div>
+        <div id="status" class="status">Загрузка…</div>
+        <div class="small">
+          <a id="sheetLink" href="#" target="_blank" rel="noreferrer">Открыть таблицу</a>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Фильтры</div>
+
+        <label class="label">Вопрос (карта):</label>
+        <select id="questionSelect" class="input"></select>
+
+        <label class="label">Район:</label>
+        <select id="districtSelect" class="input"></select>
+
+        <label class="label">Поиск населённого пункта:</label>
+        <input id="settlementSearch" class="input" type="text" placeholder="например: Ижевск">
+
+        <label class="label">Поиск лингвистической единицы:</label>
+        <input id="unitSearch" class="input" type="text" placeholder="например: што">
+
+        <button id="resetBtn" class="btn">Сбросить фильтры</button>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Добавить точку (Удмуртия)</div>
+
+        <label class="label">Населённый пункт:</label>
+        <input id="addSettlement" class="input" type="text" placeholder="например: Ижевск">
+
+        <div class="small" style="margin-top:6px;">
+          Нажми <b>Найти</b> — координаты определятся автоматически. Можно также кликнуть по карте.
+        </div>
+        <button id="findBtn" class="btn" type="button">Найти на карте</button>
+
+        <label class="label">Район:</label>
+        <input id="addDistrict" class="input" type="text" placeholder="например: г. Ижевск">
+
+        <label class="label">Вопрос:</label>
+        <select id="addQuestionSelect" class="input"></select>
+
+        <div id="customQuestionBox" style="display:none; margin-top:8px;">
+          <label class="label">Текст нового вопроса:</label>
+          <input id="customQuestionText" class="input" type="text" placeholder="например: Как произносят слово «что»?">
+
+          <label class="label">ID вопроса (необязательно):</label>
+          <input id="customQuestionId" class="input" type="text" placeholder="например: Q3 (если пусто — создастся автоматически)">
+        </div>
+
+        <label class="label">Ответ (единица 1):</label>
+        <input id="addUnit1" class="input" type="text" placeholder="например: што">
+
+        <label class="label">Единица 2 (необязательно):</label>
+        <input id="addUnit2" class="input" type="text">
+
+        <label class="label">Комментарий (необязательно):</label>
+        <input id="addComment" class="input" type="text">
+
+        <button id="addBtn" class="btn" type="button">Добавить точку</button>
+
+        <div class="small" style="margin-top:8px;color:#666;">
+          После добавления обнови страницу — данные из Google могут подгружаться с задержкой 10–60 сек.
+        </div>
+
+        <!-- скрытая форма отправки (без CORS проблем) -->
+        <iframe name="hiddenFrame" style="display:none;"></iframe>
+        <form id="addForm" method="POST" target="hiddenFrame">
+          <input type="hidden" name="district" id="f_district">
+          <input type="hidden" name="settlement" id="f_settlement">
+          <input type="hidden" name="lat" id="f_lat">
+          <input type="hidden" name="lon" id="f_lon">
+          <input type="hidden" name="question_id" id="f_question_id">
+          <input type="hidden" name="question" id="f_question">
+          <input type="hidden" name="unit1" id="f_unit1">
+          <input type="hidden" name="unit2" id="f_unit2">
+          <input type="hidden" name="comment" id="f_comment">
+        </form>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Легенда</div>
+        <div id="legend" class="legend"></div>
+      </div>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div class="table-wrap">
+        <div class="table-title">Строки (результаты фильтрации)</div>
+        <div id="table" class="table"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Конфиг прокидываем из Flask
+    window.LAB3_CONFIG = {
+      dataUrl: "{{ url_for('lab3_data') }}",
+      addEndpoint: "{{ add_endpoint }}",
+      sheetEditUrl: "{{ sheet_edit_url }}",
+      sheetPublicUrl: "{{ sheet_public_url }}"
+    };
+  </script>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <script src="{{ url_for('static', filename='lab3/app.js') }}"></script>
+</body>
+</html>
