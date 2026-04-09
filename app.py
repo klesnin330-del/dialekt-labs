@@ -1,6 +1,7 @@
 import os
 
-from flask import Flask, render_template, request, send_from_directory
+import requests
+from flask import Flask, Response, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 from services.speech_to_text import transcribe_audio
@@ -22,6 +23,38 @@ ALLOWED_EXTENSIONS = {"wav", "mp3", "m4a", "ogg", "flac"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["RESULTS_FOLDER"] = RESULTS_FOLDER
 app.config["GENERATED_FOLDER"] = GENERATED_FOLDER
+
+
+LAB3_SHEET_TSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQhB0NVyBGYG4nzX-H0LB9HOUHDBER3S9LrjCZQtPonNZQImkbNcKcgbKVw7WHFiHLntTK3XGq1lTDX/pub?gid=0&single=true&output=tsv"
+LAB3_ADD_ENDPOINT = "https://script.google.com/macros/s/AKfycbzeZS5Ss1M-oHPgc7d0j82DldM0kYBOUabjtUk_n0Dazph_FPlDVAQinFeKj-CFoog/exec"
+LAB3_SHEET_EDIT_URL = ""  # сюда при желании вставишь edit-ссылку на таблицу
+
+
+@app.route("/lab3")
+def lab3():
+    return render_template(
+        "lab3.html",
+        add_endpoint=LAB3_ADD_ENDPOINT,
+        sheet_edit_url=LAB3_SHEET_EDIT_URL,
+        sheet_public_url=LAB3_SHEET_TSV_URL
+    )
+
+
+@app.route("/lab3/data")
+def lab3_data():
+    """
+    Проксируем TSV через сервер, чтобы:
+    1) не зависеть от CORS в браузере
+    2) не ломать кириллицу из-за неверной декодировки requests (r.text)
+    """
+    r = requests.get(LAB3_SHEET_TSV_URL, timeout=30)
+
+    # ВАЖНО: отдаём сырые байты, а не r.text
+    return Response(
+        r.content,
+        content_type="text/tab-separated-values; charset=utf-8",
+        headers={"Cache-Control": "no-store"}
+    )
 
 
 def allowed_file(filename: str) -> bool:
@@ -85,7 +118,6 @@ def lab2():
     error = None
     result = None
 
-    # значения по умолчанию для формы
     voice = request.form.get("voice", "ru-RU-DmitryNeural")
     rate = request.form.get("rate", "+0%")
     input_mode = request.form.get("input_mode", "orth")  # orth | phon
@@ -98,11 +130,9 @@ def lab2():
             if not text:
                 raise ValueError("Введите текст.")
 
-            # готовим текст для синтеза речи
             if input_mode == "orth":
                 tts_text = apply_simple_dialect_rules(text) if dialect else text
             else:
-                # режим "транскрипция"
                 tts_text = phonetic_to_pronounceable_text(text)
 
             filename = synthesize_to_mp3(
