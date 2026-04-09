@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ЛР3 — Интерактивная карта русских говоров Удмуртии</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+
+  <link rel="stylesheet" href="./style.css"/>
+</head>
+<body>
+  <header class="header">
+    <div class="title">ЛР3 — Интерактивная карта русских говоров Удмуртии</div>
+    <div class="subtitle">
+      Данные редактируются в таблице (Google Sheets). Карта обновляется после перезагрузки страницы.
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="block">
+        <div class="block-title">Данные</div>
+        <div id="status" class="status">Загрузка…</div>
+        <div class="small">
+          <a id="sheetLink" href="#" target="_blank" rel="noreferrer">Открыть таблицу</a>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Фильтры</div>
+
+        <label class="label">Вопрос (карта):</label>
+        <select id="questionSelect" class="input"></select>
+
+        <label class="label">Регион:</label>
+        <select id="regionSelect" class="input"></select>
+
+        <label class="label">Район:</label>
+        <select id="districtSelect" class="input"></select>
+
+        <label class="label">Поиск населённого пункта:</label>
+        <input id="settlementSearch" class="input" type="text" placeholder="например: Ижевск">
+
+        <label class="label">Поиск лингвистической единицы:</label>
+        <input id="unitSearch" class="input" type="text" placeholder="например: што">
+
+        <button id="resetBtn" class="btn">Сбросить фильтры</button>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Легенда</div>
+        <div id="legend" class="legend"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Инструкция</div>
+        <ol class="help">
+          <li>Выберите вопрос в списке «Вопрос (карта)» — точки перекрасятся по ответам.</li>
+          <li>Используйте фильтры по региону/району и поиск по пунктам.</li>
+          <li>Нажмите на точку на карте, чтобы увидеть данные пункта.</li>
+          <li>Чтобы изменить данные — откройте таблицу и отредактируйте строки.</li>
+        </ol>
+      </div>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div class="table-wrap">
+        <div class="table-title">Строки (результаты фильтрации)</div>
+        <div id="table" class="table"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <script src="./app.js"></script>
+</body>
+</html>
