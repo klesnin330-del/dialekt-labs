@@ -1,48 +1,101 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Автоматическая транскрипция диалектной речи</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ЛР1 — Транскрипция диалектной речи</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <h1>Автоматическая транскрипция диалектной речи</h1>
-        <nav class="nav">
-            <a href="/">ЛР1: Транскрипция</a>
-            <a href="/lab2">ЛР2: Генерация речи</a>
-            <a href="/lab3">ЛР3: Карта</a>
-        </nav>
+  <div class="container">
+    <div class="headerRow">
+      <div>
+        <h1>ЛР1 — Автоматическая транскрипция диалектной речи</h1>
         <p class="subtitle">
-            Загрузите аудиофайл, чтобы получить орфографическую запись и фонетическую транскрипцию.
+          Загрузите аудиофайл, чтобы получить орфографическую запись и транскрипцию (кириллица + латиница).
         </p>
 
-        <form method="POST" enctype="multipart/form-data" class="upload-form">
-            <input type="file" name="audio_file" accept=".wav,.mp3,.m4a,.ogg,.flac" required>
-            <button type="submit">Обработать</button>
-        </form>
+        <nav class="nav">
+          <a href="/">ЛР1: Транскрипция</a>
+          <a href="/lab3">ЛР3: Карта</a>
+        </nav>
+      </div>
 
-        {% if error %}
-            <div class="error">{{ error }}</div>
-        {% endif %}
-
-        {% if result %}
-            <div class="result-block">
-                <h2>Результат</h2>
-                <p><strong>Файл:</strong> {{ result.filename }}</p>
-
-                <div class="result-section">
-                    <h3>Орфографическая запись</h3>
-                    <div class="result-box">{{ result.orthographic_text }}</div>
-                </div>
-
-                <div class="result-section">
-                    <h3>Транскрипция</h3>
-                    <div class="result-box">{{ result.phonetic_text }}</div>
-                </div>
-            </div>
-        {% endif %}
+      <button id="helpBtn" class="helpBtn" title="Справка">?</button>
     </div>
+
+    <form method="POST" enctype="multipart/form-data" class="upload-form">
+      <input type="file" name="audio_file" accept=".wav,.mp3,.m4a,.ogg,.flac" required>
+      <button type="submit">Обработать</button>
+    </form>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+      <div class="result-block">
+        <h2>Результат</h2>
+        <p><strong>Файл:</strong> {{ result.filename }}</p>
+
+        <div class="result-section">
+          <h3>Орфографическая запись</h3>
+          <div class="result-box">{{ result.orthographic_text }}</div>
+        </div>
+
+        <div class="result-section">
+          <h3>Транскрипция (кириллица)</h3>
+          <div class="result-box">{{ result.phonetic_cyr }}</div>
+        </div>
+
+        <div class="result-section">
+          <h3>Транскрипция (латиница)</h3>
+          <div class="result-box">{{ result.phonetic_lat }}</div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Help modal -->
+  <div id="helpModal" class="modal hidden" aria-hidden="true">
+    <div class="modal__backdrop" id="helpCloseBackdrop"></div>
+    <div class="modal__body">
+      <div class="modal__header">
+        <div class="modal__title">Инструкция пользователя (ЛР1)</div>
+        <button id="helpCloseX" class="modal__close">×</button>
+      </div>
+      <div class="modal__content">
+        <ol class="helpList">
+          <li>Пожалуйста, выберите аудиофайл (wav/mp3/m4a/ogg/flac).</li>
+          <li>Нажмите кнопку <b>«Обработать»</b>.</li>
+          <li>Ознакомьтесь с результатами: <b>орфографическая запись</b>, <b>транскрипция кириллицей</b>, <b>транскрипция латиницей</b>.</li>
+          <li>Если результат пустой, попробуйте более короткий фрагмент (5–20 секунд) и запись без музыки.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const helpBtn = document.getElementById("helpBtn");
+    const helpModal = document.getElementById("helpModal");
+    const helpCloseBackdrop = document.getElementById("helpCloseBackdrop");
+    const helpCloseX = document.getElementById("helpCloseX");
+
+    const openHelp = () => {
+      helpModal.classList.remove("hidden");
+      helpModal.setAttribute("aria-hidden", "false");
+    };
+    const closeHelp = () => {
+      helpModal.classList.add("hidden");
+      helpModal.setAttribute("aria-hidden", "true");
+    };
+
+    helpBtn.addEventListener("click", openHelp);
+    helpCloseBackdrop.addEventListener("click", closeHelp);
+    helpCloseX.addEventListener("click", closeHelp);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeHelp();
+    });
+  </script>
 </body>
 </html>

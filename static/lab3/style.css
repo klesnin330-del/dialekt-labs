@@ -1,42 +1,32 @@
-.header {
-  padding: 16px 18px;
-  background: #ffffff;
-  border-bottom: 1px solid #dfe5ee;
+.containerWide {
+  max-width: 1600px;
+  margin: 22px auto;
+  padding: 0 16px;
 }
 
-.title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1f3c88;
-}
-
-.subtitle {
-  margin-top: 6px;
-  color: #555;
-  font-size: 13px;
-}
-
-.layout {
+/* 3 columns: left filters | center map | right info */
+.lab3Layout3 {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: 420px 1fr 420px;
   gap: 12px;
-  padding: 12px;
 }
 
-.panel {
+/* side panels */
+.lab3Panel {
   background: #fff;
   border: 1px solid #dfe5ee;
   border-radius: 12px;
   padding: 12px;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 220px);
   overflow: auto;
 }
 
-.map-wrap {
+/* center column: map + table */
+.lab3MainCenter {
+  height: calc(100vh - 220px);
   display: grid;
   grid-template-rows: 1fr 260px;
   gap: 12px;
-  height: calc(100vh - 120px);
 }
 
 #map {
@@ -46,6 +36,7 @@
   border-radius: 12px;
 }
 
+/* blocks */
 .block {
   border: 1px solid #eef2f8;
   border-radius: 10px;
@@ -85,8 +76,8 @@
   background: #1f3c88;
   color: #fff;
   cursor: pointer;
+  font-weight: 700;
 }
-
 .btn:hover { background: #16306d; }
 
 .status {
@@ -99,11 +90,8 @@
 
 .small { margin-top: 6px; font-size: 13px; }
 
-.legend {
-  display: grid;
-  gap: 6px;
-}
-
+/* legend */
+.legend { display: grid; gap: 6px; }
 .legend-item {
   display: grid;
   grid-template-columns: 16px 1fr;
@@ -111,7 +99,6 @@
   align-items: center;
   font-size: 13px;
 }
-
 .swatch {
   width: 16px;
   height: 16px;
@@ -119,28 +106,65 @@
   border: 1px solid rgba(0,0,0,0.15);
 }
 
+/* info panel */
+.pointInfo {
+  font-size: 13px;
+  color: #222;
+  line-height: 1.35;
+  background: #fff;
+  border: 1px solid #dfe5ee;
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.pointInfo h3 {
+  margin: 0 0 6px 0;
+  color: #1f3c88;
+  font-size: 16px;
+}
+
+.pointInfo .meta {
+  color: #444;
+  margin-top: 4px;
+}
+
+.pointInfo .cat {
+  margin-top: 10px;
+  font-weight: 800;
+}
+
+.pointInfo ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+/* table */
 .table-wrap {
   background: #fff;
   border: 1px solid #dfe5ee;
   border-radius: 12px;
   overflow: auto;
 }
-
 .table-title {
   padding: 10px 12px;
   border-bottom: 1px solid #dfe5ee;
   font-weight: 700;
   color: #1f3c88;
 }
-
 .table {
   padding: 10px 12px;
   font-size: 13px;
 }
-
 .row {
   border-bottom: 1px solid #eef2f8;
   padding: 8px 0;
 }
-
 .row:last-child { border-bottom: none; }
+
+/* responsive */
+@media (max-width: 1200px) {
+  .lab3Layout3 { grid-template-columns: 1fr; }
+  .lab3Panel { height: auto; }
+  .lab3MainCenter { height: auto; grid-template-rows: 520px 260px; }
+  #map { height: 520px; }
+}
