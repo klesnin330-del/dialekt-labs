@@ -2,21 +2,22 @@
   const cfg = window.LAB3_CONFIG || {};
   const dataUrl = cfg.dataUrl || "/lab3/data";
   const appendUrl = cfg.appendUrl || "/lab3/append";
-  const geocodeUrl = cfg.geocodeUrl || "/lab3/geocode";
+  const geocodeUrl = cfg.geocodeUrl || "";
 
-  const $ = (sel, root=document) => root.querySelector(sel);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const norm = (s) => String(s || "").trim().toLowerCase();
 
-  function parseTSV(text) {
+  function parseTSV(text){
     if (window.Papa) {
-      const res = Papa.parse(text, { header: true, delimiter: "\t", skipEmptyLines: true });
+      const res = Papa.parse(text, { header:true, delimiter:"\t", skipEmptyLines:true });
       return res.data || [];
     }
+    // fallback
     const lines = String(text || "").split(/\r?\n/).filter(Boolean);
     if (!lines.length) return [];
-    const head = lines[0].split("\t").map(s => s.trim());
+    const head = lines[0].split("\t").map(x => x.trim());
     const out = [];
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = 1; i < lines.length; i++){
       const cols = lines[i].split("\t");
       const row = {};
       for (let j = 0; j < head.length; j++) row[head[j]] = (cols[j] ?? "").trim();
@@ -25,104 +26,124 @@
     return out;
   }
 
-  async function loadRows() {
-    const r = await fetch(dataUrl, { cache: "no-store" });
+  async function fetchTSVRows(){
+    const r = await fetch(dataUrl, { cache:"no-store" });
     const buf = await r.arrayBuffer();
     const txt = new TextDecoder("utf-8").decode(buf);
     return parseTSV(txt);
   }
 
-  function getMap() {
-    return window.__LAB3_MAP || window.map || null; // у вас в старом коде карта часто в window.map
+  function getMap(){
+    // старый lab3/app.js может держать карту как window.map, либо мы ранее ставили window.__LAB3_MAP
+    return window.__LAB3_MAP || window.map || null;
   }
 
-  async function waitReady(timeoutMs = 12000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-      const panel = $(".lab3Panel");
-      const mainQ = $("#questionSelect");
-      const map = getMap();
-      const mainFilled = mainQ && mainQ.options && mainQ.options.length >= 2; // больше, чем плейсхолдер
-      if (panel && map && mainFilled) return { panel, map, mainQ };
-      await new Promise(r => setTimeout(r, 200));
-    }
-    return null;
+  function setMsg(el, t, ok=true){
+    el.textContent = t || "";
+    el.style.color = ok ? "#1f3c88" : "#b00020";
   }
 
-  function buildUI(panel) {
+  function buildBlock(panel){
+    // если уже добавляли — не дублируем
+    const old = document.getElementById("ap_block");
+    if (old) return old;
+
     const wrap = document.createElement("div");
     wrap.className = "block";
-    wrap.id = "addPointBlock";
-
+    wrap.id = "ap_block";
     wrap.innerHTML = `
       <div class="block-title">Добавление точки</div>
-      <div class="small">
-        Пожалуйста, выберите вопрос, включите режим и нажмите на карту (или выберите населённый пункт).
-      </div>
+      <div class="small">Выберите вопрос, включите режим и нажмите на карту.</div>
 
       <label class="label">Вопрос (для добавления):</label>
-      <select id="addQuestionSelect" class="input"></select>
+      <select id="ap_q" class="input"></select>
 
-      <div id="addQuestionCustomWrap" style="display:none; margin-top:8px;">
+      <div id="ap_new_wrap" style="display:none; margin-top:8px;">
         <label class="label">Новый вопрос (ID/номер или текст):</label>
-        <input id="addQuestionCustom" class="input" type="text" placeholder="например: 152 или текст вопроса">
-        <div class="small">Поле используется только если выбрано «Добавить новый вопрос…».</div>
+        <input id="ap_new" class="input" type="text" placeholder="например: 152 или текст вопроса">
       </div>
 
-      <button id="addToggleBtn" class="btn">Режим добавления: выкл</button>
+      <button id="ap_toggle" class="btn">Режим добавления: выкл</button>
 
       <label class="label">Населённый пункт:</label>
-      <input id="addSettlement" class="input" list="settlementDatalist" placeholder="Начните ввод..." />
-      <datalist id="settlementDatalist"></datalist>
+      <input id="ap_settlement" class="input" list="ap_settlement_dl" placeholder="Начните ввод..." />
+      <datalist id="ap_settlement_dl"></datalist>
 
       <label class="label">Район:</label>
-      <input id="addDistrict" class="input" type="text" placeholder="например: Шарканский" />
+      <input id="ap_district" class="input" type="text" placeholder="например: Шарканский" />
 
       <div class="row">
-        <input id="addLat" class="input" type="text" placeholder="lat" readonly />
-        <input id="addLon" class="input" type="text" placeholder="lon" readonly />
+        <input id="ap_lat" class="input" type="text" placeholder="lat" readonly />
+        <input id="ap_lon" class="input" type="text" placeholder="lon" readonly />
       </div>
 
       <label class="label">Единица (ответ):</label>
-      <input id="addUnit" class="input" type="text" placeholder="например: хата" />
+      <input id="ap_unit" class="input" type="text" placeholder="например: хата" />
 
       <label class="label">Комментарий (необязательно):</label>
-      <input id="addComment" class="input" type="text" />
+      <input id="ap_comment" class="input" type="text" />
 
-      <button id="addSubmitBtn" class="btn btn--primary">Добавить в таблицу</button>
-      <div id="addMsg" class="small"></div>
+      <button id="ap_submit" class="btn btn--primary">Добавить в таблицу</button>
+      <div id="ap_msg" class="small"></div>
     `;
 
     panel.appendChild(wrap);
     return wrap;
   }
 
-  function fillAddQuestionsFromMain(mainQ, addQ) {
-    addQ.innerHTML = "";
-
-    // копируем все существующие вопросы из основного селекта
-    for (let i = 0; i < mainQ.options.length; i++) {
-      const o = mainQ.options[i];
-      const val = String(o.value || "").trim();
-      const text = String(o.textContent || "").trim();
-      if (i === 0 && !val) continue; // пропустить "— выберите —"
-      const n = document.createElement("option");
-      n.value = val;
-      n.textContent = text;
-      if (o.dataset && o.dataset.question) n.dataset.question = o.dataset.question;
-      addQ.appendChild(n);
+  function fillQuestions(sel, rows){
+    const mapQ = new Map();
+    for (const r of rows){
+      const qid = String(r.question_id || "").trim();
+      const q = String(r.question || "").trim();
+      const d = String(r.darya_no || "").trim();
+      if (!qid && !q) continue;
+      const key = qid || q;
+      if (!mapQ.has(key)) mapQ.set(key, { qid: qid || key, q: q || qid || key, darya: d });
     }
 
-    const optNew = document.createElement("option");
-    optNew.value = "__NEW__";
-    optNew.textContent = "➕ Добавить новый вопрос…";
-    addQ.appendChild(optNew);
+    const list = Array.from(mapQ.values()).sort((a,b) => String(a.qid).localeCompare(String(b.qid), "ru"));
+    sel.innerHTML = "";
+
+    const o0 = document.createElement("option");
+    o0.value = "";
+    o0.textContent = "— выберите вопрос —";
+    sel.appendChild(o0);
+
+    for (const x of list){
+      const o = document.createElement("option");
+      o.value = x.qid;
+      o.textContent = x.darya ? `${x.qid} (ДАРЯ ${x.darya}) — ${x.q}` : `${x.qid} — ${x.q}`;
+      o.dataset.question = x.q;
+      sel.appendChild(o);
+    }
+
+    const onew = document.createElement("option");
+    onew.value = "__NEW__";
+    onew.textContent = "➕ Добавить новый вопрос…";
+    sel.appendChild(onew);
   }
 
-  async function tryGeocode(name) {
-    try {
-      const r = await fetch(`${geocodeUrl}?q=${encodeURIComponent(name)}`, { cache: "no-store" });
-      const j = await r.json();
+  function fillSettlements(dl, rows){
+    dl.innerHTML = "";
+    const seen = new Set();
+    for (const r of rows){
+      const s = String(r.settlement || "").trim();
+      if (!s) continue;
+      const k = s.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const o = document.createElement("option");
+      o.value = s;
+      dl.appendChild(o);
+    }
+  }
+
+  async function geocode(name){
+    if (!geocodeUrl) return null;
+    try{
+      const r = await fetch(`${geocodeUrl}?q=${encodeURIComponent(name)}`, { cache:"no-store" });
+      const j = await r.json().catch(() => null);
       if (!j || !j.ok) return null;
       const lat = parseFloat(j.lat);
       const lon = parseFloat(j.lon);
@@ -134,71 +155,55 @@
   }
 
   (async () => {
-    const ready = await waitReady();
-    if (!ready) return;
+    // 1) найдём левую панель
+    const panel = document.querySelector(".lab3Panel");
+    if (!panel) return;
 
-    const { panel, map, mainQ } = ready;
+    // 2) создаём блок UI всегда
+    const block = buildBlock(panel);
 
-    // создаём UI в панели, НЕ трогая ваш старый HTML
-    const ui = buildUI(panel);
+    const selQ = block.querySelector("#ap_q");
+    const wrapNew = block.querySelector("#ap_new_wrap");
+    const inpNew = block.querySelector("#ap_new");
+    const btnToggle = block.querySelector("#ap_toggle");
+    const inpSettlement = block.querySelector("#ap_settlement");
+    const dl = block.querySelector("#ap_settlement_dl");
+    const inpDistrict = block.querySelector("#ap_district");
+    const inpLat = block.querySelector("#ap_lat");
+    const inpLon = block.querySelector("#ap_lon");
+    const inpUnit = block.querySelector("#ap_unit");
+    const inpComment = block.querySelector("#ap_comment");
+    const btnSubmit = block.querySelector("#ap_submit");
+    const msg = block.querySelector("#ap_msg");
 
-    const addQ = $("#addQuestionSelect", ui);
-    const addQWrap = $("#addQuestionCustomWrap", ui);
-    const addQCustom = $("#addQuestionCustom", ui);
-    const btnToggle = $("#addToggleBtn", ui);
-    const inpSettlement = $("#addSettlement", ui);
-    const dlSettlements = $("#settlementDatalist", ui);
-    const inpDistrict = $("#addDistrict", ui);
-    const inpLat = $("#addLat", ui);
-    const inpLon = $("#addLon", ui);
-    const inpUnit = $("#addUnit", ui);
-    const inpComment = $("#addComment", ui);
-    const btnSubmit = $("#addSubmitBtn", ui);
-    const msg = $("#addMsg", ui);
+    setMsg(msg, "Загрузка списка вопросов…");
 
-    const setMsg = (t, ok=true) => { msg.textContent = t || ""; msg.style.color = ok ? "#1f3c88" : "#b00020"; };
-
-    // вопросы берём из уже заполненного основного списка (это то, что у вас работало вчера)
-    fillAddQuestionsFromMain(mainQ, addQ);
-
-    // если основной список поменяется (иногда при перезагрузке данных), пересоберём
-    const obs = new MutationObserver(() => {
-      if (mainQ.options.length >= 2) fillAddQuestionsFromMain(mainQ, addQ);
-    });
-    obs.observe(mainQ, { childList: true });
-
-    addQ.addEventListener("change", () => {
-      addQWrap.style.display = (addQ.value === "__NEW__") ? "block" : "none";
-    });
-
-    // подгружаем данные только для подсказок по пунктам
+    // 3) грузим TSV для вопросов/подсказок
     let rows = [];
-    try {
-      rows = await loadRows();
-      const seen = new Set();
-      for (const r of rows) {
-        const s = String(r.settlement || "").trim();
-        if (!s) continue;
-        const k = s.toLowerCase();
-        if (seen.has(k)) continue;
-        seen.add(k);
-        const o = document.createElement("option");
-        o.value = s;
-        dlSettlements.appendChild(o);
-      }
-    } catch {
-      // не критично
+    try{
+      rows = await fetchTSVRows();
+      fillQuestions(selQ, rows);
+      fillSettlements(dl, rows);
+      setMsg(msg, "Готово: выберите вопрос и включите режим добавления.");
+    } catch(e){
+      setMsg(msg, "Ошибка: не удалось загрузить TSV (проверьте ссылку таблицы).", false);
+      return;
     }
 
+    selQ.addEventListener("change", () => {
+      wrapNew.style.display = (selQ.value === "__NEW__") ? "block" : "none";
+    });
+
+    // 4) режим добавления: будем “ждать” карту и ловить клики по DOM
     let addMode = false;
     let tempMarker = null;
 
-    function setCoords(lat, lon) {
+    function setCoords(map, lat, lon){
       inpLat.value = Number(lat).toFixed(6);
       inpLon.value = Number(lon).toFixed(6);
 
       if (tempMarker) tempMarker.remove();
-      tempMarker = L.marker([lat, lon], { draggable: true }).addTo(map);
+      tempMarker = L.marker([lat, lon], { draggable:true }).addTo(map);
       tempMarker.on("dragend", () => {
         const p = tempMarker.getLatLng();
         inpLat.value = p.lat.toFixed(6);
@@ -206,37 +211,47 @@
       });
     }
 
-    btnToggle.addEventListener("click", () => {
+    btnToggle.addEventListener("click", async () => {
+      const map = getMap();
+      if (!map) { setMsg(msg, "Карта ещё не готова. Подождите 2–3 секунды и попробуйте снова.", false); return; }
       addMode = !addMode;
       btnToggle.textContent = addMode ? "Режим добавления: вкл" : "Режим добавления: выкл";
       map.getContainer().style.cursor = addMode ? "crosshair" : "";
-      setMsg(addMode ? "Нажмите на карту, чтобы указать координаты." : "");
+      setMsg(msg, addMode ? "Нажмите на карту для выбора координат." : "");
     });
 
-    map.on("click", (e) => {
+    // DOM click по #map (надежнее, чем map.on('click') если что-то мешает)
+    const mapDiv = document.getElementById("map");
+    mapDiv.addEventListener("click", (ev) => {
       if (!addMode) return;
-      setCoords(e.latlng.lat, e.latlng.lng);
-    });
+      const map = getMap();
+      if (!map) return;
+      const latlng = map.mouseEventToLatLng(ev);
+      setCoords(map, latlng.lat, latlng.lng);
+    }, true);
 
-    async function autofillSettlement() {
+    // подсказка по поселению
+    async function autofillSettlement(){
       const name = String(inpSettlement.value || "").trim();
       if (!name) return;
-
       const hit = rows.find(r => norm(r.settlement) === norm(name) && r.lat && r.lon);
-      if (hit) {
+
+      const map = getMap();
+
+      if (hit && map){
         if (hit.district && !inpDistrict.value) inpDistrict.value = String(hit.district).trim();
         const lat = parseFloat(hit.lat);
         const lon = parseFloat(hit.lon);
-        if (Number.isFinite(lat) && Number.isFinite(lon)) {
-          setCoords(lat, lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)){
+          setCoords(map, lat, lon);
           map.setView([lat, lon], Math.max(map.getZoom(), 10));
         }
         return;
       }
 
-      const g = await tryGeocode(name);
-      if (g) {
-        setCoords(g.lat, g.lon);
+      const g = await geocode(name);
+      if (g && map){
+        setCoords(map, g.lat, g.lon);
         map.setView([g.lat, g.lon], Math.max(map.getZoom(), 10));
       }
     }
@@ -244,23 +259,24 @@
     inpSettlement.addEventListener("change", autofillSettlement);
     inpSettlement.addEventListener("blur", autofillSettlement);
 
+    // 5) отправка
     btnSubmit.addEventListener("click", async () => {
-      setMsg("");
+      setMsg(msg, "");
 
-      if (!appendUrl) { setMsg("appendUrl не задан.", false); return; }
+      if (!appendUrl) { setMsg(msg, "appendUrl не задан.", false); return; }
 
-      let question_id = String(addQ.value || "").trim();
+      let question_id = String(selQ.value || "").trim();
       let question = "";
 
-      if (!question_id) { setMsg("Выберите вопрос для добавления.", false); return; }
+      if (!question_id) { setMsg(msg, "Выберите вопрос для добавления.", false); return; }
 
-      if (question_id === "__NEW__") {
-        const v = String(addQCustom.value || "").trim();
-        if (!v) { setMsg("Введите новый вопрос.", false); return; }
+      if (question_id === "__NEW__"){
+        const v = String(inpNew.value || "").trim();
+        if (!v) { setMsg(msg, "Введите новый вопрос.", false); return; }
         question_id = v;
         question = v;
       } else {
-        const opt = addQ.options[addQ.selectedIndex];
+        const opt = selQ.options[selQ.selectedIndex];
         question = (opt?.dataset?.question || opt?.textContent || "").trim();
       }
 
@@ -271,10 +287,10 @@
       const unit1 = String(inpUnit.value || "").trim();
       const comment = String(inpComment.value || "").trim();
 
-      if (!settlement) { setMsg("Укажите населённый пункт.", false); return; }
-      if (!district) { setMsg("Укажите район.", false); return; }
-      if (!lat || !lon) { setMsg("Укажите координаты (клик по карте).", false); return; }
-      if (!unit1) { setMsg("Укажите единицу (ответ).", false); return; }
+      if (!settlement) { setMsg(msg, "Укажите населённый пункт.", false); return; }
+      if (!district) { setMsg(msg, "Укажите район.", false); return; }
+      if (!lat || !lon) { setMsg(msg, "Укажите координаты (клик по карте).", false); return; }
+      if (!unit1) { setMsg(msg, "Укажите единицу (ответ).", false); return; }
 
       const payload = {
         source: "user",
@@ -294,24 +310,23 @@
       };
 
       btnSubmit.disabled = true;
-      try {
+      setMsg(msg, "Отправка…");
+      try{
         const r = await fetch(appendUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(payload)
         });
         const txt = await r.text();
-        if (!r.ok) throw new Error(txt || ("HTTP " + r.status));
-        setMsg("Точка добавлена. Обновите страницу, чтобы увидеть её на карте.");
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt}`);
+        setMsg(msg, "Точка добавлена. Обновите страницу, чтобы увидеть её на карте.");
         inpUnit.value = "";
         inpComment.value = "";
-      } catch (e) {
-        setMsg("Ошибка добавления: " + (e?.message || e), false);
+      } catch(e){
+        setMsg(msg, "Ошибка добавления: " + (e?.message || e), false);
       } finally {
         btnSubmit.disabled = false;
       }
     });
-
-    setMsg("Добавление точки готово.");
   })();
 })();
