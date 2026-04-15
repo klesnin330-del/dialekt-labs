@@ -74,7 +74,7 @@
           <button id="resetBtn" class="btn">Сбросить фильтры</button>
         </div>
 
-        <div class="block">
+        <div class="block" id="legendBlock">
           <div class="block-title">Легенда</div>
           <div id="legend" class="legend"></div>
           <div class="small" style="margin-top:6px;color:#666;">
@@ -138,6 +138,8 @@
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
   <script src="{{ url_for('static', filename='lab3/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='lab3/add_point.js') }}?v=1"></script>
+  
 
   <script>
     const helpBtn = document.getElementById("helpBtn");

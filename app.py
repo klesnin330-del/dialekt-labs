@@ -1,7 +1,6 @@
 import os
 import requests
-
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 
 from services.speech_to_text import transcribe_audio
@@ -22,18 +21,54 @@ app.config["RESULTS_FOLDER"] = RESULTS_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
-# --- ЛР3: ссылки на таблицу (TSV) ---
+# --- ЛР3: ссылки ---
+LAB3_SHEET_EDIT_URL = "https://docs.google.com/spreadsheets/d/1WTbCv4YxW6OyHYZW4f0F1lQkNshqyTQ5Fu4lAGiY-mA/edit?usp=sharing"
+
+# TSV (ВАЖНО: не pubhtml, а pub + output=tsv)
 LAB3_SHEET_TSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQhB0NVyBGYG4nzX-H0LB9HOUHDBER3S9LrjCZQtPonNZQImkbNcKcgbKVw7WHFiHLntTK3XGq1lTDX/pub?gid=0&single=true&output=tsv"
-LAB3_SHEET_EDIT_URL = ""
+
+# Apps Script endpoint
+LAB3_ADD_ENDPOINT = "https://script.google.com/macros/s/AKfycbzCojNe4gKjuy4Zko1ujLqLiC48gbxFDDesBliXVPc-ffqbR0Hqys8W2PiIgu4kBH0/exec"
 
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.get("/lab3/geocode")
+def lab3_geocode():
+    """
+    Геокодинг через Nominatim (OSM).
+    Нужен для вашего старого функционала поиска/подстановки координат.
+    """
+    q = (request.args.get("q") or request.args.get("query") or "").strip()
+    if not q:
+        return jsonify({"ok": False, "error": "empty query"}), 400
 
-# -------------------------
-# ЛР1
-# -------------------------
+    # чтобы результаты были ближе к нужному региону
+    query = f"{q}, Удмуртия, Россия"
+
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "jsonv2", "limit": 1},
+            headers={"User-Agent": "lab3-dialect-map/1.0"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return jsonify({"ok": False, "error": "not found"}), 404
+
+        item = data[0]
+        return jsonify({
+            "ok": True,
+            "lat": item.get("lat"),
+            "lon": item.get("lon"),
+            "display_name": item.get("display_name", "")
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
@@ -73,9 +108,6 @@ def index():
     return render_template("index.html", result=result, error=error)
 
 
-# -------------------------
-# ЛР3: карта
-# -------------------------
 @app.route("/lab3")
 def lab3():
     return render_template(
@@ -87,55 +119,36 @@ def lab3():
 
 @app.route("/lab3/data")
 def lab3_data():
-    # TSV через сервер: CORS + кодировка
     r = requests.get(LAB3_SHEET_TSV_URL, timeout=30)
     return Response(
         r.content,
         content_type="text/tab-separated-values; charset=utf-8",
-        headers={"Cache-Control": "no-store"}
+        headers={"Cache-Control": "no-store"},
     )
 
 
-# --- Геокодирование через сервер (чтобы было стабильно и без CORS) ---
-_GEOCODE_CACHE = {}
+@app.post("/lab3/append")
+def lab3_append():
+    """
+    Прокси добавления строки через Apps Script (чтобы не было проблем CORS).
+    """
+    if not LAB3_ADD_ENDPOINT:
+        return jsonify({"ok": False, "error": "LAB3_ADD_ENDPOINT is empty"}), 500
 
-@app.route("/lab3/geocode")
-def lab3_geocode():
-    q = (request.args.get("q") or "").strip()
-    if not q:
-        return jsonify(ok=False, error="missing q"), 400
-
-    if q in _GEOCODE_CACHE:
-        return jsonify(ok=True, **_GEOCODE_CACHE[q])
-
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        "format": "json",
-        "limit": 1,
-        "countrycodes": "ru",
-        "q": q
-    }
-    headers = {
-        "User-Agent": "DialectLab-Lab3/1.0 (educational project)"
-    }
+    data = request.get_json(force=True, silent=False) or {}
+    payload = {"action": "append"}
+    payload.update({k: "" if v is None else str(v) for k, v in data.items()})
 
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=20)
-        r.raise_for_status()
-        data = r.json()
+        r = requests.post(LAB3_ADD_ENDPOINT, data=payload, timeout=30)
+        return Response(
+            r.content,
+            status=r.status_code,
+            content_type=r.headers.get("Content-Type", "text/plain; charset=utf-8"),
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception as e:
-        return jsonify(ok=False, error=f"geocode request failed: {str(e)}"), 502
-
-    if not data:
-        return jsonify(ok=False, error="not found"), 404
-
-    lat = float(data[0]["lat"])
-    lon = float(data[0]["lon"])
-    display_name = data[0].get("display_name", "")
-
-    res = {"lat": lat, "lon": lon, "display_name": display_name}
-    _GEOCODE_CACHE[q] = res
-    return jsonify(ok=True, **res)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
