@@ -1,480 +1,302 @@
 const CFG = window.LAB3_CONFIG || {};
 const DATA_URL = CFG.dataUrl || "/lab3/data";
 const GEOCODE_URL = CFG.geocodeUrl || "/lab3/geocode";
-const SHEET_LINK = CFG.sheetEditUrl || CFG.sheetPublicUrl || "#";
+const APPEND_URL = CFG.appendUrl || "/lab3/append";
 
+const UDM_BOUNDS = { minLat: 55.5, maxLat: 58.9, minLon: 51.0, maxLon: 55.8 };
 const PALETTE = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"];
 
-let allRows = [];
-let filteredRows = [];
-let points = new Map();        // key -> {meta, rows, sheetCoord, coord}
-let selectedPointKey = null;
+let allRows = [], filteredRows = [];
+let map, layerGroup, unitColor = new Map();
+let addMarker = null, addLat = null, addLon = null;
 
-let map, cluster;
-let unitColor = new Map();
+window._lab3_add_lat = null;
+window._lab3_add_lon = null;
 
-// --- UI ---
 const elStatus = document.getElementById("status");
 const elLegend = document.getElementById("legend");
 const elTable = document.getElementById("table");
-const elPointInfo = document.getElementById("pointInfo");
-const elSheetLink = document.getElementById("sheetLink");
-
-const elAutoGeo = document.getElementById("autoGeo");
 const elQuestion = document.getElementById("questionSelect");
 const elDistrict = document.getElementById("districtSelect");
 const elSettlementSearch = document.getElementById("settlementSearch");
 const elUnitSearch = document.getElementById("unitSearch");
-const elDaryaSearch = document.getElementById("daryaSearch");
 const elReset = document.getElementById("resetBtn");
-const elClearGeoCacheBtn = document.getElementById("clearGeoCacheBtn");
+const elSheetLink = document.getElementById("sheetLink");
+const elPointInfo = document.getElementById("pointInfo");
 
-// --- helpers ---
-function norm(s){ return (s ?? "").toString().trim(); }
-function toNum(x){
-  const v = parseFloat((x ?? "").toString().replace(",", "."));
-  return Number.isFinite(v) ? v : null;
-}
+const elAddSettlement = document.getElementById("addSettlement");
+const elAddType = document.getElementById("addType");
+const elAddDistrict = document.getElementById("addDistrict");
+const elAddQuestion = document.getElementById("addQuestionSelect");
+const elAddUnit1 = document.getElementById("addUnit1");
+const elAddUnit2 = document.getElementById("addUnit2");
+const elAddComment = document.getElementById("addComment");
+const elFindBtn = document.getElementById("findBtn");
+const elAddBtn = document.getElementById("addBtn");
+
+function norm(s){ return (s??"").toString().trim(); }
+function toNum(x){ const v = parseFloat((x??"").toString().replace(",",".")); return Number.isFinite(v)? v : null; }
 function uniq(arr){ return Array.from(new Set(arr)); }
-function setStatus(t){ elStatus.textContent = t; }
-
-function escapeHtml(s){
-  return String(s ?? "")
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;");
+function setStatus(t){ if(elStatus) elStatus.textContent = t; }
+function inUdmurtia(lat, lon){
+  return lat >= UDM_BOUNDS.minLat && lat <= UDM_BOUNDS.maxLat &&
+         lon >= UDM_BOUNDS.minLon && lon <= UDM_BOUNDS.maxLon;
 }
-
-function cleanSettlementName(s){
-  return norm(s).replace(/^(с\.|д\.|п\.|г\.)\s*/i, "").trim();
-}
-
-function makePointKey(r){
-  // стабильный ключ для кэша: регион|район|пункт
-  return `${norm(r.region)}|${norm(r.district)}|${norm(r.settlement)}`;
-}
-
 function fillSelect(selectEl, options, allLabel="— Все —"){
   const prev = selectEl.value;
   selectEl.innerHTML = "";
   const optAll = document.createElement("option");
-  optAll.value = "";
-  optAll.textContent = allLabel;
+  optAll.value = ""; optAll.textContent = allLabel;
   selectEl.appendChild(optAll);
-
-  for (const o of options){
+  options.forEach(o => {
     const opt = document.createElement("option");
-    opt.value = o.value;
-    opt.textContent = o.label;
+    opt.value = o.value; opt.textContent = o.label;
+    // ✅ Единый формат: ключи в dataset совпадают с чтением
+    if(o.source !== undefined) opt.dataset.source = String(o.source);
+    if(o.daryaNo !== undefined) opt.dataset.daryano = String(o.daryaNo);
+    if(o.category !== undefined) opt.dataset.category = String(o.category);
     selectEl.appendChild(opt);
-  }
-  if (options.some(o => o.value === prev)) selectEl.value = prev;
+  });
+  if(options.some(o => o.value === prev)) selectEl.value = prev;
 }
-
-function answerUnitForQuestion(pointRows, qid){
-  if (!qid) return "";
-  const r = pointRows.find(x => norm(x.question_id) === qid);
-  return norm(r?.unit1) || norm(r?.unit2) || "";
-}
-
+function answerUnit(row){ return norm(row.unit1) || norm(row.unit2) || ""; }
 function colorForUnit(unit){
-  if (!unit) return "#1f3c88";
-  if (!unitColor.has(unit)) unitColor.set(unit, PALETTE[unitColor.size % PALETTE.length]);
+  if(!unit) return "#1f3c88";
+  if(!unitColor.has(unit)) unitColor.set(unit, PALETTE[unitColor.size % PALETTE.length]);
   return unitColor.get(unit);
 }
-
 function buildLegend(units){
   elLegend.innerHTML = "";
-  if (!units.length){
-    elLegend.textContent = "Нет данных для легенды.";
-    return;
-  }
-  for (const u of units){
-    const item = document.createElement("div");
-    item.className = "legend-item";
-
-    const sw = document.createElement("div");
-    sw.className = "swatch";
-    sw.style.background = colorForUnit(u);
-
-    const txt = document.createElement("div");
-    txt.textContent = u;
-
-    item.appendChild(sw);
-    item.appendChild(txt);
+  if(!units.length){ elLegend.textContent = "Нет данных для легенды."; return; }
+  units.forEach(u => {
+    const item = document.createElement("div"); item.className = "legend-item";
+    const sw = document.createElement("div"); sw.className = "swatch"; sw.style.background = colorForUnit(u);
+    const txt = document.createElement("div"); txt.textContent = u;
+    item.appendChild(sw); item.appendChild(txt);
     elLegend.appendChild(item);
-  }
+  });
+}
+function renderTable(rows){
+  elTable.innerHTML = "";
+  if(!rows.length){ elTable.textContent = "Нет строк по текущим фильтрам."; return; }
+  rows.slice(0, 200).forEach(r => {
+    const div = document.createElement("div"); div.className = "row";
+    div.innerHTML = `<div><b>${norm(r.settlement)}</b> — ${norm(r.district)}</div><div><i>${norm(r.question)}</i></div><div>Ответ: <b>${norm(r.unit1)}</b> ${norm(r.unit2)?"/"+norm(r.unit2):""}</div>${norm(r.comment)?`<div>Комментарий: ${norm(r.comment)}</div>`:""}`;
+    elTable.appendChild(div);
+  });
 }
 
 function initMap(){
   map = L.map("map").setView([57.0, 53.0], 7);
   map.attributionControl.setPrefix(false);
-
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
-
-  cluster = L.markerClusterGroup();
-  map.addLayer(cluster);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"&copy; OpenStreetMap"}).addTo(map);
+  layerGroup = L.layerGroup().addTo(map);
+  map.on("click", (e) => setAddPoint(e.latlng.lat, e.latlng.lng, "Координаты выбраны кликом"));
 }
 
-function clearMarkers(){ cluster.clearLayers(); }
+function setAddPoint(lat, lon, msg){
+  lat = Number(lat); lon = Number(lon);
+  if(!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  if(!inUdmurtia(lat, lon)){ setStatus("Точка вне границ Удмуртии."); return; }
+  addLat = lat; addLon = lon;
+  window._lab3_add_lat = lat; window._lab3_add_lon = lon;
+  if(addMarker) map.removeLayer(addMarker);
+  addMarker = L.marker([lat, lon]).addTo(map).bindPopup("Новая точка").openPopup();
+  setStatus(`${msg} (lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)})`);
+}
 
-function renderTable(rows){
-  elTable.innerHTML = "";
-  if (!rows.length){
-    elTable.textContent = "Нет строк по текущим фильтрам.";
-    return;
-  }
+async function geocodeSettlement(name){
+  const res = await fetch(`${GEOCODE_URL}?q=${encodeURIComponent(name)}`, {cache:"no-store"});
+  const data = await res.json();
+  if(!data.ok) return null;
+  return { lat: Number(data.lat), lon: Number(data.lon) };
+}
 
-  rows.slice(0,200).forEach(r => {
-    const div = document.createElement("div");
-    div.className = "row";
-    div.innerHTML = `
-      <div><b>${escapeHtml(r.settlement)}</b> — ${escapeHtml(r.district)}, ${escapeHtml(r.region)}</div>
-      <div><i>${escapeHtml(r.category || "")}</i> ${escapeHtml(r.question || "")}</div>
-      <div>Ответ: <b>${escapeHtml(r.unit1 || "")}</b>${r.unit2 ? " / " + escapeHtml(r.unit2) : ""}</div>
-    `;
-    elTable.appendChild(div);
+function clearMarkers(){ layerGroup.clearLayers(); }
+
+function drawMarkers(rows){
+  clearMarkers(); unitColor = new Map();
+  const activeQuestion = norm(elQuestion.value);
+  const shouldColor = !!activeQuestion;
+  if(shouldColor){ buildLegend(uniq(rows.map(answerUnit).filter(Boolean))); }
+  else { elLegend.innerHTML = '<div style="color:#666;font-size:13px;">Выберите вопрос для легенды</div>'; }
+  
+  rows.forEach(r => {
+    const lat = toNum(r.lat), lon = toNum(r.lon);
+    if(lat===null || lon===null) return;
+    const color = shouldColor ? colorForUnit(answerUnit(r)) : "#333333";
+    const marker = L.circleMarker([lat, lon], {radius:6, color:"#000", weight:1, fillColor:color, fillOpacity:0.85});
+    marker.bindPopup(`<div style="font-size:13px;"><b>${norm(r.settlement)}</b><br>${norm(r.district)}<hr><b>Вопрос:</b> ${norm(r.question)}<br><b>Ответ:</b> ${norm(r.unit1)} ${norm(r.unit2)}</div>`);
+    marker.on('click', () => {
+      if(elPointInfo){
+        const current = norm(r.settlement);
+        const allHere = allRows.filter(x => norm(x.settlement) === current);
+        let html = `<h3>${current}</h3><div class="meta"><b>Район:</b> ${norm(allHere[0]?.district)}</div><ul>`;
+        allHere.forEach(x => html += `<li style="margin-bottom:6px;"><b>${norm(x.question)}</b>: ${norm(x.unit1)}</li>`);
+        html += `</ul>`; elPointInfo.innerHTML = html;
+      }
+    });
+    layerGroup.addLayer(marker);
   });
-}
-
-function renderPointInfo(key){
-  if (!key || !points.has(key)){
-    elPointInfo.innerHTML = "Пожалуйста, выберите точку на карте, чтобы увидеть сведения о пункте.";
-    return;
-  }
-  const p = points.get(key);
-  const r0 = p.rows[0];
-
-  const byCat = new Map();
-  for (const r of p.rows){
-    const cat = norm(r.category) || "Прочее";
-    if (!byCat.has(cat)) byCat.set(cat, []);
-    byCat.get(cat).push(r);
-  }
-
-  const catsHtml = Array.from(byCat.entries()).map(([cat, rows]) => {
-    const items = rows.map(rr => {
-      const code = escapeHtml(rr.question_id || rr.darya_no || "");
-      const q = escapeHtml(rr.question || "");
-      const ans = escapeHtml(rr.unit1 || rr.unit2 || "");
-      return `<li>${code}: ${q} — <b>${ans}</b></li>`;
-    }).join("");
-    return `<div class="cat">${escapeHtml(cat)}</div><ul>${items}</ul>`;
-  }).join("");
-
-  const coordText = p.coord ? `${p.coord.lat.toFixed(5)}, ${p.coord.lon.toFixed(5)}` : "—";
-
-  elPointInfo.innerHTML = `
-    <h3>${escapeHtml(r0.settlement)}</h3>
-    <div class="meta"><b>Тип:</b> ${escapeHtml(r0.type || "")}</div>
-    <div class="meta"><b>Район:</b> ${escapeHtml(r0.district || "")}</div>
-    <div class="meta"><b>Регион:</b> ${escapeHtml(r0.region || "")}</div>
-    <div class="meta"><b>Координаты:</b> ${coordText}</div>
-    <hr/>
-    <div style="font-weight:900;">Диалектные признаки:</div>
-    ${catsHtml}
-  `;
 }
 
 function updateDistrictOptions(){
-  const districts = uniq(allRows.map(r => norm(r.district)).filter(Boolean)).sort();
-  fillSelect(elDistrict, districts.map(d => ({value:d, label:d})));
-}
-
-function buildPoints(rows){
-  points = new Map();
-  for (const r of rows){
-    const key = makePointKey(r);
-    if (!points.has(key)){
-      points.set(key, {
-        meta: { region:r.region, district:r.district, settlement:r.settlement, type:r.type },
-        rows: [],
-        sheetCoord: { lat: toNum(r.lat), lon: toNum(r.lon) },
-        coord: null
-      });
-    }
-    points.get(key).rows.push(r);
-  }
-}
-
-// ------------------------
-// КЭШ КООРДИНАТ (localStorage)
-// ------------------------
-const GEO_CACHE_KEY = "lab3_geo_cache_v1";
-
-function loadGeoCache(){
-  try{
-    const raw = localStorage.getItem(GEO_CACHE_KEY);
-    if (!raw) return {};
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === "object" ? obj : {};
-  } catch { return {}; }
-}
-
-function saveGeoCache(cacheObj){
-  try{ localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cacheObj)); } catch {}
-}
-
-function clearGeoCache(){
-  try{ localStorage.removeItem(GEO_CACHE_KEY); } catch {}
-}
-
-// ------------------------
-// Геокодирование (только для отсутствующих координат)
-// ------------------------
-function getGeocodeQuery(p){
-  const name = cleanSettlementName(p.meta.settlement);
-  const district = norm(p.meta.district);
-  const region = norm(p.meta.region);
-  return `${name}, ${district}, ${region}, Россия`;
-}
-
-// геокодим только те, у кого нет coord
-async function ensureCoordsForPoints(){
-  const auto = elAutoGeo.checked;
-  const cache = loadGeoCache();
-
-  const keys = Array.from(points.keys());
-  let need = 0;
-
-  // 1) подхватить кэш/табличные координаты
-  for (const key of keys){
-    const p = points.get(key);
-
-    if (!auto){
-      // только таблица
-      if (p.sheetCoord.lat !== null && p.sheetCoord.lon !== null){
-        p.coord = { lat: p.sheetCoord.lat, lon: p.sheetCoord.lon };
-      } else {
-        p.coord = null;
-      }
-      continue;
-    }
-
-    // auto:
-    if (cache[key]) {
-      p.coord = cache[key];
-      continue;
-    }
-
-    // пока нет кэша — попробуем табличные как временный fallback
-    if (p.sheetCoord.lat !== null && p.sheetCoord.lon !== null){
-      p.coord = { lat: p.sheetCoord.lat, lon: p.sheetCoord.lon };
-    } else {
-      p.coord = null;
-    }
-
-    need++;
-  }
-
-  if (!auto || need === 0) return;
-
-  // 2) геокодим только те, кого нет в кэше
-  let done = 0;
-  for (const key of keys){
-    const p = points.get(key);
-    if (cache[key]) continue; // уже есть
-
-    const q = getGeocodeQuery(p);
-
-    setStatus(`Определение координат (OSM): ${++done}/${need}…`);
-
-    try{
-      const url = GEOCODE_URL + "?q=" + encodeURIComponent(q);
-      const res = await fetch(url);
-      const js = await res.json();
-      if (js && js.ok){
-        const coord = { lat: js.lat, lon: js.lon };
-        cache[key] = coord;
-        p.coord = coord;
-      }
-    } catch {}
-
-    // задержка, чтобы не долбить геокодер
-    await new Promise(r => setTimeout(r, 250));
-  }
-
-  saveGeoCache(cache);
-  setStatus(`Координаты готовы. Пунктов: ${keys.length}`);
+  fillSelect(elDistrict, uniq(allRows.map(r=>norm(r.district)).filter(Boolean)).sort().map(d=>({value:d, label:d})));
 }
 
 function applyFilters(){
-  const qid = norm(elQuestion.value);
-  const dist = norm(elDistrict.value);
+  const qid = norm(elQuestion.value), dist = norm(elDistrict.value);
   const sSearch = norm(elSettlementSearch.value).toLowerCase();
   const uSearch = norm(elUnitSearch.value).toLowerCase();
-
   filteredRows = allRows.filter(r => {
-    if (qid && norm(r.question_id) !== qid) return false;
-    if (dist && norm(r.district) !== dist) return false;
-
-    if (sSearch && !norm(r.settlement).toLowerCase().includes(sSearch)) return false;
-
-    const u1 = norm(r.unit1).toLowerCase();
-    const u2 = norm(r.unit2).toLowerCase();
-    if (uSearch && !(u1.includes(uSearch) || u2.includes(uSearch))) return false;
-
+    if(qid && norm(r.question_id)!==qid) return false;
+    if(dist && norm(r.district)!==dist) return false;
+    if(sSearch && !norm(r.settlement).toLowerCase().includes(sSearch)) return false;
+    const u1=norm(r.unit1).toLowerCase(), u2=norm(r.unit2).toLowerCase();
+    if(uSearch && !(u1.includes(uSearch)||u2.includes(uSearch))) return false;
     return true;
   });
-
-  buildPoints(filteredRows);
-}
-
-function drawMarkers(){
-  clearMarkers();
-  unitColor = new Map();
-
-  const qid = norm(elQuestion.value);
-
-  const units = uniq(
-    Array.from(points.values())
-      .map(p => answerUnitForQuestion(p.rows, qid))
-      .filter(Boolean)
-  );
-  buildLegend(units);
-
-  for (const [key, p] of points.entries()){
-    if (!p.coord) continue;
-
-    const unit = answerUnitForQuestion(p.rows, qid);
-    const color = colorForUnit(unit);
-
-    const marker = L.circleMarker([p.coord.lat, p.coord.lon], {
-      radius: 8,
-      color: "#ffffff",
-      weight: 2,
-      fillColor: color,
-      fillOpacity: 0.9,
-    });
-
-    marker.on("click", () => {
-      selectedPointKey = key;
-      renderPointInfo(key);
-    });
-
-    cluster.addLayer(marker);
-  }
-
-  if (selectedPointKey && !points.has(selectedPointKey)){
-    selectedPointKey = null;
-    renderPointInfo(null);
-  }
+  drawMarkers(filteredRows); renderTable(filteredRows);
+  setStatus(`Строк: ${filteredRows.length}`);
 }
 
 async function loadData(){
-  elSheetLink.href = SHEET_LINK;
-  setStatus("Загрузка данных…");
-
-  const res = await fetch(DATA_URL + "?t=" + Date.now());
-  const buf = await res.arrayBuffer();
-  const tsv = new TextDecoder("utf-8").decode(buf);
-
-  const parsed = Papa.parse(tsv, { header: true, skipEmptyLines: true, delimiter: "\t" });
-
+  elSheetLink.href = CFG.sheetEditUrl || CFG.sheetPublicUrl || "#";
+  setStatus("Загрузка данных...");
+  const res = await fetch(DATA_URL+"?t="+Date.now());
+  const tsv = await res.text();
+  const parsed = Papa.parse(tsv, {header:true, skipEmptyLines:true, delimiter:"\t"});
   allRows = parsed.data.map(r => ({
-    source: norm(r.source || ""),
-    region: norm(r.region || ""),
-    district: norm(r.district || ""),
-    settlement: norm(r.settlement || ""),
-    type: norm(r.type || r.settlement_type || ""),
-    lat: norm(r.lat || r.latitude || ""),
-    lon: norm(r.lon || r.longitude || ""),
-    darya_no: norm(r.darya_no || ""),
-    question_id: norm(r.question_id || r.darya_no || ""),
-    question: norm(r.question || ""),
-    category: norm(r.category || ""),
-    unit1: norm(r.unit1 || ""),
-    unit2: norm(r.unit2 || ""),
-    comment: norm(r.comment || "")
+    source:norm(r.source), region:norm(r.region), district:norm(r.district), settlement:norm(r.settlement),
+    type:norm(r.type), lat:norm(r.lat), lon:norm(r.lon), darya_no:norm(r.darya_no),
+    question_id:norm(r.question_id), question:norm(r.question), category:norm(r.category),
+    unit1:norm(r.unit1), unit2:norm(r.unit2), comment:norm(r.comment)
   }));
-
-  // список вопросов: value=question_id, label=category: question
+  
   const qMap = new Map();
-  for (const r of allRows){
+  allRows.forEach(r => {
     const id = norm(r.question_id);
-    if (!id) continue;
-    const label = (r.category ? `${r.category}: ` : "") + (r.question || id);
-    if (!qMap.has(id)) qMap.set(id, label);
-  }
-
-  const qOptions = Array.from(qMap.entries())
-    .map(([value,label]) => ({value,label}))
-    .sort((a,b) => a.label.localeCompare(b.label, "ru"));
-
-  fillSelect(elQuestion, qOptions, "— Выберите вопрос —");
+    if (id && !qMap.has(id)) {
+      qMap.set(id, {
+        text: norm(r.question) || id,
+        source: r.source || "ДАРЯ (выборка)",
+        darya_no: r.darya_no || "",
+        category: r.category || ""  // ✅ category теперь точно сохраняется
+      });
+    }
+  });
+  
+  const qOpts = Array.from(qMap.entries()).map(([qid, data])=>({
+    value: qid, label: data.text, source: data.source, daryaNo: data.darya_no, category: data.category
+  })).sort((a,b)=>a.label.localeCompare(b.label,"ru"));
+  
+  fillSelect(elQuestion, qOpts, "— Выберите вопрос —");
+  fillSelect(elAddQuestion, [...qOpts, {value:"__custom__", label:"Другое (ввести вручную)", source:"", daryaNo:"", category:""}], "— Выберите вопрос —");
+  
   updateDistrictOptions();
-
-  // initial filter + coords + draw
-  applyFilters();
-  await ensureCoordsForPoints();
-  drawMarkers();
-  renderTable(filteredRows);
-  renderPointInfo(selectedPointKey);
-
-  setStatus(`Готово. Строк: ${filteredRows.length}, пунктов: ${points.size}`);
+  setStatus(`Данные загружены. Всего строк: ${allRows.length}`);
 }
 
 function wireEvents(){
-  // ВАЖНО: при фильтрах мы больше НЕ чистим кэш и не геокодим всё заново,
-  // а геокодим только новые точки, которых ещё нет в localStorage.
-  async function refreshAfterFilter(){
-    applyFilters();
-    await ensureCoordsForPoints();
-    drawMarkers();
-    renderTable(filteredRows);
-    renderPointInfo(selectedPointKey);
-  }
+  elQuestion.addEventListener("change", applyFilters);
+  elDistrict.addEventListener("change", applyFilters);
+  elSettlementSearch.addEventListener("input", () => setTimeout(applyFilters, 150));
+  elUnitSearch.addEventListener("input", () => setTimeout(applyFilters, 150));
+  elReset.addEventListener("click", () => { elQuestion.value=""; elDistrict.value=""; elSettlementSearch.value=""; elUnitSearch.value=""; applyFilters(); });
 
-  elQuestion.addEventListener("change", refreshAfterFilter);
-  elDistrict.addEventListener("change", refreshAfterFilter);
-
-  elSettlementSearch.addEventListener("input", () => setTimeout(refreshAfterFilter, 200));
-  elUnitSearch.addEventListener("input", () => setTimeout(refreshAfterFilter, 200));
-
-  elAutoGeo.addEventListener("change", async () => {
-    await ensureCoordsForPoints();
-    drawMarkers();
-    renderPointInfo(selectedPointKey);
+  let debounceTimer;
+  elAddSettlement.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      const name = norm(elAddSettlement.value); if(!name) return;
+      const hit = allRows.find(r => norm(r.settlement) === name && r.lat && r.lon);
+      if(hit){
+        setAddPoint(hit.lat, hit.lon, "Найдено в базе");
+        elAddDistrict.value = hit.district || "";
+        elAddType.value = hit.type || "село";
+      } else {
+        setStatus("Поиск координат...");
+        const p = await geocodeSettlement(name);
+        if(p) setAddPoint(p.lat, p.lon, "Найдено через OSM");
+      }
+    }, 400);
   });
 
-  elDaryaSearch.addEventListener("input", () => {
-    const q = norm(elDaryaSearch.value);
-    if (!q) return;
-    const found = allRows.find(r => norm(r.question_id) === q || norm(r.darya_no) === q);
-    if (found){
-      elQuestion.value = norm(found.question_id);
-      elQuestion.dispatchEvent(new Event("change"));
-    }
+  elFindBtn.addEventListener("click", async () => {
+    const s = norm(elAddSettlement.value); if(!s){ setStatus("Введите пункт."); return; }
+    setStatus("Поиск (OSM)...");
+    try{ const p = await geocodeSettlement(s); if(!p){ setStatus("Не найдено."); return; } map.setView([p.lat, p.lon], 12); setAddPoint(p.lat, p.lon, "Координаты определены"); }
+    catch{ setStatus("Ошибка геокодирования."); }
   });
 
-  elReset.addEventListener("click", async () => {
-    elDaryaSearch.value = "";
-    elQuestion.value = "";
-    elDistrict.value = "";
-    elSettlementSearch.value = "";
-    elUnitSearch.value = "";
-    selectedPointKey = null;
-    renderPointInfo(null);
-    await refreshAfterFilter();
-  });
+  if(elAddBtn){
+    elAddBtn.addEventListener("click", async () => {
+      console.log("[DEBUG] Кнопка нажата");
+      const settlement = norm(elAddSettlement.value);
+      const district = norm(elAddDistrict.value);
+      const typeVal = norm(elAddType.value) || "село";
+      const unit1 = norm(elAddUnit1.value);
+      const unit2 = norm(elAddUnit2.value);
+      const comment = norm(elAddComment.value);
+      
+      let qid = norm(elAddQuestion.value);
+      let qtext = norm(elAddQuestion.options[elAddQuestion.selectedIndex]?.textContent);
+      
+      let source = "ДАРЯ (выборка)";
+      let darya_no = "";
+      let category = "";  // ✅ category инициализирован
+      
+      if(qid !== "__custom__"){
+        const selected = elAddQuestion.options[elAddQuestion.selectedIndex];
+        if(selected){
+          source = selected.dataset?.source || "ДАРЯ (выборка)";
+          darya_no = selected.dataset?.daryano || "";
+          category = selected.dataset?.category || "";  // ✅ category читается
+        }
+      }
+      
+      if(!settlement || !district || !qid || !unit1){ setStatus("❌ Заполните: пункт, район, вопрос, единицу 1."); return; }
+      const lat = addLat ?? window._lab3_add_lat;
+      const lon = addLon ?? window._lab3_add_lon;
+      if(lat===null || lon===null){ setStatus("❌ Выберите место на карте."); return; }
 
-  if (elClearGeoCacheBtn){
-    elClearGeoCacheBtn.addEventListener("click", async () => {
-      clearGeoCache();
-      setStatus("Кэш координат очищен. Координаты будут определены заново.");
-      await ensureCoordsForPoints();
-      drawMarkers();
-      renderPointInfo(selectedPointKey);
+      elAddBtn.disabled = true; elAddBtn.textContent = "Отправка..."; setStatus("⏳ Отправка...");
+      try{
+        const payload = {
+          source: String(source),
+          region: "Удмуртская Республика",
+          district: String(district),
+          settlement: String(settlement),
+          type: String(typeVal),
+          lat: String(lat),
+          lon: String(lon),
+          darya_no: String(darya_no),
+          question_id: String(qid),
+          question: String(qtext),
+          category: String(category),  // ✅ category передаётся
+          unit1: String(unit1),
+          unit2: String(unit2 || ""),
+          comment: String(comment || "")
+        };
+        console.log("[DEBUG] Payload:", payload);
+        
+        const res = await fetch(APPEND_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+        const result = await res.json();
+        console.log("[DEBUG] Response:", result);
+        
+        if(result.ok || result.status==="success"){
+          setStatus("✅ Точка добавлена! Обновляю карту...");
+          // ✅ Явно перезагружаем данные и перерисовываем карту
+          setTimeout(async()=>{ 
+            await loadData(); 
+            applyFilters();  // applyFilters вызывает drawMarkers
+            setStatus("Готово."); 
+          }, 1500);
+        } else { setStatus("❌ Ошибка: "+(result.message||result.error||"Неизвестно")); }
+      } catch(e){ console.error(e); setStatus("❌ Ошибка сети: "+e.message); }
+      finally { elAddBtn.disabled = false; elAddBtn.textContent = "Добавить в таблицу"; }
     });
   }
 }
 
-(async function main(){
-  initMap();
-  wireEvents();
-  await loadData();
-})();
+(async function main(){ initMap(); wireEvents(); await loadData(); applyFilters(); })();

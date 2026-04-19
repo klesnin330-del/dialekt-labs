@@ -21,18 +21,54 @@ app.config["RESULTS_FOLDER"] = RESULTS_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
-# ================= ЛР3: ссылки =================
+# --- ЛР3: ссылки ---
+LAB3_SHEET_EDIT_URL = "https://docs.google.com/spreadsheets/d/1WTbCv4YxW6OyHYZW4f0F1lQkNshqyTQ5Fu4lAGiY-mA/edit?usp=sharing"
+
+# TSV (ВАЖНО: не pubhtml, а pub + output=tsv)
 LAB3_SHEET_TSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQhB0NVyBGYG4nzX-H0LB9HOUHDBER3S9LrjCZQtPonNZQImkbNcKcgbKVw7WHFiHLntTK3XGq1lTDX/pub?gid=0&single=true&output=tsv"
-LAB3_SHEET_EDIT_URL = "https://docs.google.com/spreadsheets/d/1WTbCv4YxW6OyHYZW4f0F1lQkNshqyTQ5Fu4lAGiY-mA/edit?gid=0#gid=0"
-LAB3_ADD_ENDPOINT = "https://script.google.com/macros/s/AKfycbyBJ3EZcmuzymVUy3Q-WgsN-vHWVxH7MMTaFfzpJShXocd79iH6mnBa-RnCJ7F7NpY/exec"
-# ===============================================
+
+# Apps Script endpoint
+LAB3_ADD_ENDPOINT = "https://script.google.com/macros/s/AKfycbzCojNe4gKjuy4Zko1ujLqLiC48gbxFDDesBliXVPc-ffqbR0Hqys8W2PiIgu4kBH0/exec"
 
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.get("/lab3/geocode")
+def lab3_geocode():
+    """
+    Геокодинг через Nominatim (OSM).
+    Нужен для вашего старого функционала поиска/подстановки координат.
+    """
+    q = (request.args.get("q") or request.args.get("query") or "").strip()
+    if not q:
+        return jsonify({"ok": False, "error": "empty query"}), 400
 
-# ================= ЛР1 =================
+    # чтобы результаты были ближе к нужному региону
+    query = f"{q}, Удмуртия, Россия"
+
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "jsonv2", "limit": 1},
+            headers={"User-Agent": "lab3-dialect-map/1.0"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return jsonify({"ok": False, "error": "not found"}), 404
+
+        item = data[0]
+        return jsonify({
+            "ok": True,
+            "lat": item.get("lat"),
+            "lon": item.get("lon"),
+            "display_name": item.get("display_name", "")
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     result = None
@@ -72,15 +108,12 @@ def index():
     return render_template("index.html", result=result, error=error)
 
 
-# ================= ЛР3 =================
-
 @app.route("/lab3")
 def lab3():
     return render_template(
         "lab3.html",
         sheet_edit_url=LAB3_SHEET_EDIT_URL,
         sheet_public_url=LAB3_SHEET_TSV_URL,
-        add_endpoint=LAB3_ADD_ENDPOINT,
     )
 
 
@@ -94,60 +127,20 @@ def lab3_data():
     )
 
 
-@app.get("/lab3/geocode")
-def lab3_geocode():
-    q = (request.args.get("q") or request.args.get("query") or "").strip()
-    if not q:
-        return jsonify({"ok": False, "error": "empty query"}), 400
-    query = f"{q}, Удмуртская Республика, Россия"
-    try:
-        r = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": query, "format": "jsonv2", "limit": 1, "countrycodes": "ru"},
-            headers={"User-Agent": "dialekt-lab3/1.0"},
-            timeout=20,
-        )
-        r.raise_for_status()
-        data = r.json()
-        if not data:
-            return jsonify({"ok": False, "error": "not found"}), 404
-        item = data[0]
-        return jsonify({
-            "ok": True,
-            "lat": item.get("lat"),
-            "lon": item.get("lon"),
-            "display_name": item.get("display_name", "")
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @app.post("/lab3/append")
 def lab3_append():
+    """
+    Прокси добавления строки через Apps Script (чтобы не было проблем CORS).
+    """
     if not LAB3_ADD_ENDPOINT:
         return jsonify({"ok": False, "error": "LAB3_ADD_ENDPOINT is empty"}), 500
 
-    data = request.get_json(force=True, silent=True) or {}
-    
-    payload = {
-        "source": str(data.get("source", "ДАРЯ (выборка)")),
-        "region": str(data.get("region", "Удмуртская Республика")),
-        "district": str(data.get("district", "")),
-        "settlement": str(data.get("settlement", "")),
-        "type": str(data.get("type", "село")),
-        "lat": str(data.get("lat", "")),
-        "lon": str(data.get("lon", "")),
-        "darya_no": str(data.get("darya_no", "")),
-        "question_id": str(data.get("question_id", "")),
-        "question": str(data.get("question", "")),
-        "category": str(data.get("category", "")),  # ✅ category теперь точно передаётся
-        "unit1": str(data.get("unit1", "")),
-        "unit2": str(data.get("unit2", "")),
-        "comment": str(data.get("comment", ""))
-    }
+    data = request.get_json(force=True, silent=False) or {}
+    payload = {"action": "append"}
+    payload.update({k: "" if v is None else str(v) for k, v in data.items()})
 
     try:
-        r = requests.post(LAB3_ADD_ENDPOINT, json=payload, timeout=30)
+        r = requests.post(LAB3_ADD_ENDPOINT, data=payload, timeout=30)
         return Response(
             r.content,
             status=r.status_code,
